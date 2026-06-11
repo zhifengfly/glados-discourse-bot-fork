@@ -1,0 +1,12 @@
+name = "glados-nodeloc-bot"
+main = "worker.js"
+compatibility_date = "2026-04-30"
+workers_dev = true
+
+[vars]
+ENV_ADMIN_ID = "你的Telegram用户ID"
+ENV_BOT_TOKEN = "Telegram Bot Token"
+
+[[kv_namespaces]]
+binding = "GLADOS_DB"
+id = ""
