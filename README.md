@@ -1,6 +1,6 @@
 # GLaDOS + NodeLoc Telegram Bot
 
-[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/YOUR_USERNAME/YOUR_REPO_NAME)
+[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Linsars/glados-nodeloc-bot)
 
 GLaDOS 自动签到 + NodeLoc 自动阅读 合体 Telegram Bot，运行在 Cloudflare Workers 上。
 
@@ -69,7 +69,7 @@ Cookie 获取：
 ## 本地开发
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/YOUR_REPO_NAME
+git clone https://github.com/Linsars/glados-nodeloc-bot
 cd YOUR_REPO_NAME
 
 # 安装 wrangler
