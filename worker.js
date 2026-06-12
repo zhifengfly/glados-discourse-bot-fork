@@ -63,8 +63,31 @@ async function nlReadTopic(cookie, topic) {
     };
     const resp = await fetch(NL_BASE + '/t/' + topic.id, { headers: hdrs });
     if (!resp.ok) throw new Error('阅读失败 #' + topic.id + ' HTTP ' + resp.status);
-    // 模拟阅读停留 10-20 秒
-    await nlSleep(nlRand(10000, 20000));
+    // 提取 CSRF token（用于 timings API）
+    const html = await resp.text();
+    const csrf = (html.match(/csrf-token" content="([^"]+)"/) || [])[1];
+    // 模拟阅读停留 30-50 秒（原脚本 45-115s，Worker 环境适当缩短）
+    const readTime = nlRand(30000, 50000);
+    await nlSleep(readTime);
+    // 调用 Discourse timings API 上报阅读时长
+    if (csrf) {
+        try {
+            await fetch(NL_BASE + '/t/' + topic.id + '/timings', {
+                method: 'POST',
+                headers: {
+                    'User-Agent': ua,
+                    'Cookie': cookie,
+                    'Content-Type': 'application/json',
+                    'X-CSRF-Token': csrf,
+                    'Accept': 'application/json, text/javascript, */*; q=0.01',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Referer': NL_BASE + '/t/' + topic.id,
+                    'Origin': NL_BASE
+                },
+                body: JSON.stringify({ timings: { 1: readTime }, topic_time: readTime })
+            });
+        } catch(e) {}
+    }
     // 返回首页
     await fetch(NL_BASE + '/', { headers: { ...hdrs, 'Referer': NL_BASE + '/t/' + topic.id } });
 }
