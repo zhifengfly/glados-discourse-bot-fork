@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # =============================================
-# GLaDOS Bot + NodeLoc — 一键部署脚本
+# GLaDOS Bot + Discourse 多站自动阅读 — 一键部署脚本
 # 用法: bash deploy.sh <BOT_TOKEN> <ADMIN_ID> <KV_NAMESPACE_ID>
 # =============================================
 
 set -euo pipefail
 
 echo "=========================================="
-echo " GLaDOS Bot + NodeLoc 部署脚本"
+echo " GLaDOS Bot + Discourse 多站自动阅读 部署脚本"
 echo "=========================================="
 
 if [ $# -ne 3 ]; then
