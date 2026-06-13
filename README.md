@@ -52,15 +52,15 @@ wrangler deploy
 
 在 Telegram 中与 Bot 对话，通过菜单操作：
 
-### GLaDOS 账号
-点「绑定账号」→ 输入 GLaDOS Cookie（直接从浏览器复制）
-
 ### Discourse 论坛（NodeLoc / NodeSeek / LinuxDO）
-点「添加账号」→ 选择对应站点 → **发送 Cookie 即可**（无需名称，格式：`_forum_session=xxx; _t=yyy`）
+点「添加账号」→ 选择对应站点 → **发送 Cookie 即可**（格式：`_forum_session=xxx; _t=yyy`）
 
-所有 Discourse 站点绑定方式完全一样。
+Bot 自动调 Discourse API 提取用户名和邮箱，无需手动取名。
 
-> 💡 支持给论坛昵称命名：`我的别名:_forum_session=xxx; _t=yyy`
+### GLaDOS 账号
+点「绑定账号」→ 发送 GLaDOS Cookie 即可（格式：`connect.sid=xxx; ...`）
+
+Bot 自动调 GLaDOS API 提取邮箱和对应域名，无需指定。
 
 ## 获取 Cookie（Surge / Loon / QX / Egern 模块）
 
@@ -107,6 +107,15 @@ https://raw.githubusercontent.com/Linsars/Surge/main/sg/glados.yaml
 | 🥈 TL2 成员 | 100 篇，60 分钟，15 天 | ✅ 阅读 + 访问 |
 | 🥇 TL3 常规 | 200 话题 + 500 帖累计，100 天考察 | ✅ 阅读 + 访问 |
 | 👑 TL4 领袖 | 手动授予 | ❌ |
+
+### LinuxDO [Discourse 信任度](https://linux.do/t/topic/2460)
+
+| 等级 | 关键条件 | Bot 能跑的 |
+|------|---------|-----------|
+| 🥉 TL1 基础 | 10 分钟阅读，15 篇帖子 | ✅ 全部 |
+| 🥈 TL2 成员 | 300 分钟，80 篇，30 天 | ✅ 阅读 + 访问 |
+| 🥇 TL3 常规 | 2000 分钟，500 篇，100 天 | ✅ 阅读 + 访问 |
+| 👑 TL4 领袖 | 手动，隐藏 | ❌ |
 
 ## 技术架构
 
