@@ -512,7 +512,7 @@ async function handleCallback(callbackQuery, env, origin) {
                     [{ text: "🔙 返回账号列表", callback_data: "list_manage" }]
                 ]
             };
-            await tgEdit(chatId, messageId, `⚙️ <b>管理账户</b>\n\n当前账户：<code>${maskEmail(acc.email, pref.showEmail)}</code>\n所属站点：<code>${acc.domain}</code>\n\n请选择操作：`, kb, env);
+            await tgEdit(chatId, messageId, `⚙️ <b>管理账户</b>\n\n当前账户：<code>${maskEmail(acc.email || acc.username || '?', pref.showEmail)}</code>\n所属站点：<code>${acc.domain}</code>\n\n请选择操作：`, kb, env);
         } else if (action === 'exchange') {
             await showExchangePlans(chatId, messageId, index, acc, userId, env);
         } else if (action === 'sub') {
@@ -530,7 +530,7 @@ async function handleCallback(callbackQuery, env, origin) {
         if (acc.domain === 'nodeloc.com') {
             const pref = await getPref(userId, env);
             const st = await env.GLADOS_DB.get('NL_STATE_' + userId, 'json') || { readsToday: 0 };
-            return tgSend(chatId, `🌐 <b>NodeLoc 自动阅读</b>\n\n👤 账号: ${maskEmail(acc.email, pref.showEmail)}\n📊 今日已读: ${st.readsToday || 0} 帖`, env);
+            return tgSend(chatId, `🌐 <b>NodeLoc 自动阅读</b>\n\n👤 账号: ${maskEmail(acc.email || acc.username || '?', pref.showEmail)}\n📊 今日已读: ${st.readsToday || 0} 帖`, env);
         }
         if (acc.domain === 'nodeseek.cc') {
             const pref = await getPref(userId, env);
@@ -1153,7 +1153,11 @@ async function showAccountList(chatId, messageId, userId, action, env) {
     const titles = { manage: "⚙️ 选择要管理的账号", exchange: "🔄 选择账号兑换积分", sub: "🔗 选择要提取订阅的账号" };
     const pref = await getPref(userId, env);
     let kb = [];
-    accounts.forEach((acc, i) => kb.push([{ text: `${i + 1}. ${maskEmail(acc.email, pref.showEmail)}`, callback_data: `sel_${action}_${i}` }]));
+    // nodeseek 账号用 username，其他用 email
+    accounts.forEach((acc, i) => {
+        const label = acc.email || acc.username || ('账号-' + (i+1));
+        kb.push([{ text: `${i + 1}. ${maskEmail(label, pref.showEmail)}`, callback_data: `sel_${action}_${i}` }]);
+    });
     
     if (action === 'manage') {
         kb.push([{ text: "🗑️ 清空账户", callback_data: "clear_all_confirm" }]);
