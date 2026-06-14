@@ -1,20 +1,18 @@
 name: Deploy to Cloudflare Workers
-
 on:
   push:
     branches: [main]
-    paths: ['worker.js']
+    paths: [worker.js]
 
 jobs:
   deploy:
-    if: secrets.CF_API_TOKEN != ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Upload worker.js
+      - name: Deploy worker.js
         run: |
-          curl -s -X PUT "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CF_ACCOUNT_ID }}/workers/scripts/glados-bot" \
+          curl -s -X PUT \
+            "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CF_ACCOUNT_ID }}/workers/scripts/glados-bot" \
             -H "Authorization: Bearer ${{ secrets.CF_API_TOKEN }}" \
             -F "metadata={\"main_module\":\"worker.js\",\"compatibility_date\":\"2026-04-30\",\"bindings\":[{\"name\":\"GLADOS_DB\",\"type\":\"kv_namespace\",\"namespace_id\":\"${{ secrets.KV_NS_ID }}\"}]};type=application/json" \
             -F "worker.js=@worker.js;type=application/javascript+module"
