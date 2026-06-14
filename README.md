@@ -1,12 +1,11 @@
 # GLaDOS 签到 & Discourse 多站自动阅读 Bot ☁️
 
-Telegram Bot，自动签到 GLaDOS，静默阅读 Discourse 论坛攒升级经验。
+Telegram Bot，自动签到 GLaDOS，静默阅读 NodeLoc / NodeSeek / LinuxDO Discourse 论坛攒升级经验。
 
 ## 功能
 
 - ✅ **GLaDOS 多账号签到** — 支持任意数量的 GLaDOS 类账号
-- ✅ **Discourse 多站自动阅读** — NodeLoc / NodeSeek / LinuxDO，同一引擎，随时加站
-- ✅ **扩展架构** — 任何 Discourse 论坛只需加一个 `baseUrl` 即可接入
+- ✅ **Discourse 多站自动阅读** — NodeLoc / NodeSeek / LinuxDO
 - ✅ **Telegram 管理** — 绑定/解绑账号，查看统计（帖数/时长/Cookie状态），实时通知
 - ✅ **定时执行** — Cloudflare Workers Cron 每小时触发一次，每次读 5 帖
 - ✅ **行为仿真** — 随机阅读时长 + 随机休息，避免风控
@@ -120,25 +119,44 @@ https://raw.githubusercontent.com/Linsars/Surge/main/sg/glados.yaml
 ## 技术架构
 
 ```
-┌────────────────────────────────────────────────────┐
-│               handleScheduled (cron)                │
-│  ┌─────────────┐  ┌──────────────┐                │
-│  │ GLaDOS       │  │ Discourse 阅读引擎             │
-│  │ 签到引擎     │  │ runDiscourseBatch(baseUrl)    │
-│  │              │  │ ├─ NodeLoc  (nodeloc.com)     │
-│  │ getAccount   │  │ ├─ NodeSeek (nodeseek.cc)     │
-│  │ DataObj()    │  │ └─ LinuxDO  (linux.do)        │
-│  └─────────────┘  │   任何 Discourse 站只需加一行    │
-│                    └───────────────────────────────┘
-└────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│                    handleScheduled (cron)                 │
+│  ┌────────────────┐  ┌──────────────────────────┐        │
+│  │ GLaDOS          │  │ 自动阅读引擎（慢速模式）  │        │
+│  │ 签到引擎        │  │ runNodelocBatch()        │        │
+│  │                 │  │  队列式，60-120s/帖      │        │
+│  │ getAccount      │  │  15% 概率休息 20-40 分   │        │
+│  │ DataObj()       │  │  NodeLoc / NodeSeek /   │        │
+│  └────────────────┘  │  LinuxDO 复用            │        │
+│                       └──────────────────────────┘        │
+│                                                           │
+│                    handleUpdate (webhook manual)           │
+│  ┌──────────────────────────────────────────────────┐     │
+│  │ 直读模式（fast）                                  │     │
+│  │  latest.json → for loop → 3-7s sleep → timing    │     │
+│  │  NodeLoc / NodeSeek / LinuxDO 各独立 inline 实现  │     │
+│  │  坏帖 try/catch 跳过，实时 editMessage 更新进度   │     │
+│  └──────────────────────────────────────────────────┘     │
+└──────────────────────────────────────────────────────────┘
 ```
 
-### Discourse 阅读引擎
-一次编写，所有 Discourse 论坛通用：
-- `nlRefreshQueue(baseUrl, cookie)` — 拉取最新话题列表
-- `nlReadTopic(baseUrl, cookie, topic)` — 读帖 + 标记已读
-- CSRF 自动检测：先找 HTML `<meta>`，没有则调 `/session/csrf` API 兜底
-- 队列式阅读，每 cron 读 5 帖，15% 概率休息 20-40 分钟
+### 阅读引擎说明
+
+代码中有两套阅读逻辑：
+
+| 模式 | 触发 | 节奏 | 状态管理 | 实现方式 |
+|------|------|------|---------|---------|
+| **直读（fast）** | 手动阅读（webhook callback） | 3-7 秒/帖 | 仅记录累计数 | inline，三站独立 |
+| **慢读（cron）** | `handleScheduled` | 60-120 秒/帖 | 队列+休息+累计 | `runNodelocBatch` 共用 |
+
+### 新增 Discourse 站注意事项
+
+每个新论坛配合前需要验证：
+- 话题 URL 路径：标准 `/t/{id}` 还是 `/n/topic/{id}`（如 NodeSeek）
+- 是否包含 Cloudflare 防护
+- Cookie 中是否含 `_t`（CSRF token fallback）
+- `latest.json` 返回格式是否一致
+- **`ctx.waitUntil()` 30 秒壁钟限制对 webhook 触发的所有操作生效**
 
 ## 环境变量 / Secrets
 
