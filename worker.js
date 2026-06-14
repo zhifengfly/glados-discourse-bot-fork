@@ -82,27 +82,22 @@ async function nlReadTopic(baseUrl, cookie, topic, fast = false) {
         'Cache-Control': 'no-cache',
         'Pragma': 'no-cache'
     };
+    // 页面 fetch best-effort，失败不阻断（从 cookie _t 拿 CSRF 兜底）
     const resp = await safeFetchTimeout(baseUrl + '/t/' + topic.id, { headers: hdrs }, 15000);
-    if (!resp) return { ok: false, cookieError: '', readTime: 0 };
-    if (!resp.ok) return { ok: false, cookieError: '', readTime: 0 };
-
-    // 检查 Cookie 是否失效
-    if (resp.headers.get('x-discourse-logged-out') === '1') {
-        return { ok: false, cookieError: 'Cookie 已失效，请重新添加', readTime: 0 };
-    }
-
-    const html = await Promise.race([resp.text(), new Promise(function(r){setTimeout(function(){r('')},20000)})]);
-    // 优先从 HTML meta 提取 CSRF，部分 Discourse 没有则从 /session/csrf API 获取
-    let csrf = (html.match(/csrf-token" content="([^"]+)"/) || [])[1];
-    if (!csrf) {
-        const csrfResp = await safeFetchTimeout(baseUrl + '/session/csrf', {
-            headers: { 'User-Agent': ua, 'Cookie': cookie, 'Accept': 'application/json' }
-        }, 8000);
-        if (csrfResp && csrfResp.ok) {
-            try { const d = await csrfResp.json(); csrf = d.csrf || ''; } catch(e) {}
+    let csrf = '';
+    if (resp && resp.ok) {
+        const html = await Promise.race([resp.text(), new Promise(function(r){setTimeout(function(){r('')},20000)})]);
+        csrf = (html.match(/csrf-token" content="([^"]+)"/) || [])[1];
+        if (!csrf) {
+            const csrfResp = await safeFetchTimeout(baseUrl + '/session/csrf', {
+                headers: { 'User-Agent': ua, 'Cookie': cookie, 'Accept': 'application/json' }
+            }, 8000);
+            if (csrfResp && csrfResp.ok) {
+                try { const d = await csrfResp.json(); csrf = d.csrf || ''; } catch(e) {}
+            }
         }
     }
-    // 如果还是没有 csrf，从 cookie 提取 _t
+    // 如果页面没拿到 CSRF，从 cookie 提取 _t
     if (!csrf) {
         csrf = decodeURIComponent((cookie.match(/_t=([^;]+)/) || [,''])[1]);
     }
@@ -247,6 +242,7 @@ async function runNodelocBatch(userId, cookie, env, baseUrl = NL_BASE, fast = fa
             state.totalReadTime = (state.totalReadTime || 0) + result.readTime;
             state.lastRead = now;
             state.cookieError = '';
+            delete state._lastError;
             readCount++;
 
             // 每帖后 12% 概率休息
@@ -703,16 +699,9 @@ async function handleCallback(callbackQuery, env, origin) {
                         var csrf=cookieCsrf;
                         var stage='';
                         if(!csrf){
-                            mt('📖 #'+t.id+' 获取 CSRF... ('+ok+'/5)');
-                            var r2=await fetch('https://www.nodeloc.com/t/'+t.id,{headers:{'User-Agent':HEADERS['User-Agent'],'Cookie':acc.cookie}});
-                            if(!r2.ok){ mt('⚠️ #'+t.id+' 获取失败'); skipped++; continue; }
-                            var html=await r2.text();
-                            if(html.indexOf(t.title)<0){ mt('⚠️ #'+t.id+' 已删除'); skipped++; continue; }
-                            csrf=(html.match(/csrf-token" content="([^"]+)"/)||[])[1];
-                            if(!csrf){ ok++; mt('✅ #'+t.id+' 无 CSRF'); continue; }
-                            stage='📄 '+html.length+'b';
+                            mt('⚠️ #'+t.id+' 无 CSRF，跳过'); skipped++; continue;
                         }
-                        stage+=(stage?' | ':'')+'🔑 CSRF('+(cookieCsrf?'cookie':'meta')+')';
+                        stage='🔑 CSRF(cookie)';
                         var rMs=3000+Math.floor(Math.random()*4000);
                         mt('⏳ #'+t.id+' 等待 '+Math.round(rMs/1000)+'s... ('+ok+'/5) | '+stage);
                         await new Promise(function(r){setTimeout(r,rMs)});
@@ -750,16 +739,9 @@ async function handleCallback(callbackQuery, env, origin) {
                         var csrf=cookieCsrf;
                         var stage='';
                         if(!csrf){
-                            mt('📖 #'+t.id+' 获取 CSRF... ('+ok+'/5)');
-                            var r2=await fetch('https://nodeseek.cc/t/'+t.id,{headers:{'User-Agent':HEADERS['User-Agent'],'Cookie':acc.cookie}});
-                            if(!r2.ok){ mt('⚠️ #'+t.id+' 获取失败'); skipped++; continue; }
-                            var html=await r2.text();
-                            if(html.indexOf(t.title)<0){ mt('⚠️ #'+t.id+' 已删除'); skipped++; continue; }
-                            csrf=(html.match(/csrf-token" content="([^"]+)"/)||[])[1];
-                            if(!csrf){ ok++; mt('✅ #'+t.id+' 无 CSRF'); continue; }
-                            stage='📄 '+html.length+'b';
+                            mt('⚠️ #'+t.id+' 无 CSRF，跳过'); skipped++; continue;
                         }
-                        stage+=(stage?' | ':'')+'🔑 CSRF('+(cookieCsrf?'cookie':'meta')+')';
+                        stage='🔑 CSRF(cookie)';
                         var rMs=3000+Math.floor(Math.random()*4000);
                         mt('⏳ #'+t.id+' 等待 '+Math.round(rMs/1000)+'s... ('+ok+'/5) | '+stage);
                         await new Promise(function(r){setTimeout(r,rMs)});
@@ -798,16 +780,9 @@ async function handleCallback(callbackQuery, env, origin) {
                         var csrf=cookieCsrf;
                         var stage='';
                         if(!csrf){
-                            mt('📖 #'+t.id+' 获取 CSRF... ('+ok+'/5)');
-                            var r2=await fetch('https://linux.do/t/'+t.id,{headers:{'User-Agent':HEADERS['User-Agent'],'Cookie':acc.cookie}});
-                            if(!r2.ok){ mt('⚠️ #'+t.id+' 获取失败'); skipped++; continue; }
-                            var html=await r2.text();
-                            if(html.indexOf(t.title)<0){ mt('⚠️ #'+t.id+' 已删除'); skipped++; continue; }
-                            csrf=(html.match(/csrf-token" content="([^"]+)"/)||[])[1];
-                            if(!csrf){ ok++; mt('✅ #'+t.id+' 无 CSRF'); continue; }
-                            stage='📄 '+html.length+'b';
+                            mt('⚠️ #'+t.id+' 无 CSRF，跳过'); skipped++; continue;
                         }
-                        stage+=(stage?' | ':'')+'🔑 CSRF('+(cookieCsrf?'cookie':'meta')+')';
+                        stage='🔑 CSRF(cookie)';
                         var rMs=3000+Math.floor(Math.random()*4000);
                         mt('⏳ #'+t.id+' 等待 '+Math.round(rMs/1000)+'s... ('+ok+'/5) | '+stage);
                         await new Promise(function(r){setTimeout(r,rMs)});
