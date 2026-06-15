@@ -24,7 +24,6 @@ async function safeFetchTimeout(url, opts, ms = 12000) {
 // ================= NodeLoc 自动阅读模块（v3 - 静默版） =================
 const NL_BASE = 'https://www.nodeloc.com';
 const NS_BASE = 'https://nodeseek.cc';
-const LD_BASE = 'https://linux.do';
 const NL_UAS = [
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -162,32 +161,14 @@ async function nsGetDailyStats(userId, env) {
     }
 }
 
-// 获取今日 LinuxDO 统计
-async function ldGetDailyStats(userId, env) {
-    try {
-        const state = JSON.parse(await env.GLADOS_DB.get('LD_STATE_' + userId) || '{}');
-        const today = new Date().toISOString().slice(0,10);
-        const isToday = state.date === today;
-        return {
-            readsToday: isToday ? state.readsToday : 0,
-            readTotal: state.readTotal || 0,
-            totalReadTime: Math.round((state.totalReadTime || 0) / 60000),
-            restUntil: (state.restUntil || 0) > Date.now() ? state.restUntil : 0,
-            cookieError: state.cookieError || ''
-        };
-    } catch(e) {
-        return { readsToday: 0, readTotal: 0, totalReadTime: 0, restUntil: 0, cookieError: '' };
-    }
-}
-
 // ====== 健康状态系统 ======
-const SITE_NAMES = { NL: 'NodeLoc', NS: 'NodeSeek', LD: 'LinuxDO' };
+const SITE_NAMES = { NL: 'NodeLoc', NS: 'NodeSeek' };
 
 async function getHealthSummary(userId, env) {
     const lines = [];
     // GLaDOS
     const accts = await getAccounts(userId, env);
-    const glados = accts.filter(function(a){ return a.domain !== 'nodeloc.com' && a.domain !== 'nodeseek.cc' && a.domain !== 'linux.do'; });
+    const glados = accts.filter(function(a){ return a.domain !== 'nodeloc.com' && a.domain !== 'nodeseek.cc'; });
     if (glados.length > 0) {
         const ok = glados.filter(function(a){ return a.cronSuccess !== false; }).length;
         const bad = glados.filter(function(a){ return a.cronSuccess === false; }).length;
@@ -203,7 +184,6 @@ async function getHealthSummary(userId, env) {
     const sites = [
         { domain: 'nodeloc.com', pfx: 'NL', name: 'NodeLoc' },
         { domain: 'nodeseek.cc', pfx: 'NS', name: 'NodeSeek' },
-        { domain: 'linux.do',    pfx: 'LD', name: 'LinuxDO' }
     ];
     for (const site of sites) {
         const siteAccts = accts.filter(function(a){ return a.domain === site.domain; });
@@ -637,7 +617,7 @@ async function handleCallback(callbackQuery, env, origin) {
         if (!acc) return tgSend(chatId, "❌ 找不到该账号", env);
 
         if (action === 'manage') {
-            const isDiscourse = acc.domain === 'nodeloc.com' || acc.domain === 'nodeseek.cc' || acc.domain === 'linux.do';
+            const isDiscourse = acc.domain === 'nodeloc.com' || acc.domain === 'nodeseek.cc';
             const kb = {
                 inline_keyboard: [
                     [{ text: "👁️ 查看此账户信息", callback_data: `view_acc_${index}` },
@@ -692,31 +672,6 @@ async function handleCallback(callbackQuery, env, origin) {
             const today = new Date().toISOString().slice(0,10);
             const isToday = st.date === today;
             let msg = `🔹 <b>NodeSeek 自动阅读</b>\n\n`;
-            msg += `👤 账号: ${acc.username || '?'}\n`;
-            msg += `━━━━━━━━━━━━━━━━\n`;
-            msg += `📖 今日已读: ${isToday ? (st.readsToday || 0) : 0} 帖\n`;
-            msg += `⏱ 今日阅读: ${isToday ? Math.round((st.totalReadTime || 0) / 60000) : 0} 分钟\n`;
-            msg += `📚 累计已读: ${st.readTotal || 0} 帖\n`;
-            msg += `━━━━━━━━━━━━━━━━\n`;
-            if (st.cookieError) {
-                msg += `⚠️ Cookie 异常: ${st.cookieError}\n`;
-            } else {
-                msg += `✅ Cookie 状态: 正常\n`;
-            }
-            if ((parseInt(st.restUntil) || 0) > Date.now()) {
-                const mins = Math.ceil((parseInt(st.restUntil) - Date.now()) / 60000);
-                msg += `💤 休息中（剩余 ${mins} 分钟）\n`;
-            } else {
-                msg += `⏳ 状态: 等待下次定时运行\n`;
-            }
-            return tgSend(chatId, msg, env);
-        }
-        if (acc.domain === 'linux.do') {
-            const pref = await getPref(userId, env);
-            const st = await env.GLADOS_DB.get('LD_STATE_' + userId, 'json') || {};
-            const today = new Date().toISOString().slice(0,10);
-            const isToday = st.date === today;
-            let msg = `🐧 <b>LinuxDO 自动阅读</b>\n\n`;
             msg += `👤 账号: ${acc.username || '?'}\n`;
             msg += `━━━━━━━━━━━━━━━━\n`;
             msg += `📖 今日已读: ${isToday ? (st.readsToday || 0) : 0} 帖\n`;
@@ -836,51 +791,6 @@ async function handleCallback(callbackQuery, env, origin) {
             }
             return;
         }
-        if (acc.domain === 'linux.do') {
-            var mid = callbackQuery.message.message_id;
-            var mt = function(s) { fetch('https://api.telegram.org/bot'+env.BOT_TOKEN+'/editMessageText',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chat_id:chatId,message_id:mid,text:s,parse_mode:'HTML'})}); };
-            mt('📖 LD 手动阅读\n───────');
-            try {
-                var ac = new AbortController(), acTm = setTimeout(function(){ac.abort()},12000);
-                var r1 = await fetch('https://linux.do/latest.json?no_definitions=true',{headers:{'User-Agent':HEADERS['User-Agent'],'Cookie':acc.cookie,'Accept':'application/json'},signal:ac.signal});
-                if(!r1.ok){ clearTimeout(acTm); mt('❌ 话题列表 '+r1.status); return; }
-                var d1 = await r1.json().catch(function(){return{}});
-                clearTimeout(acTm);
-                var allTopics = (d1.topic_list?.topics||[]).filter(function(t){return !t.pinned&&t.id});
-                mt('📥 列表: 共 '+allTopics.length+' 个话题，准备读 5 帖');
-                var ok=0,totalMs=0,skipped=0,tried=0;
-                var cookieCsrf=decodeURIComponent((acc.cookie.match(/_t=([^;]+)/)||[,''])[1]);
-                for(var i=0; i<allTopics.length && ok<5; i++){
-                    var t=allTopics[i]; tried++;
-                    try {
-                        var csrf=cookieCsrf;
-                        var stage='';
-                        if(!csrf){
-                            mt('⚠️ #'+t.id+' 无 CSRF，跳过'); skipped++; continue;
-                        }
-                        stage='🔑 CSRF(cookie)';
-                        var rMs=3000+Math.floor(Math.random()*4000);
-                        mt('⏳ #'+t.id+' 等待 '+Math.round(rMs/1000)+'s... ('+ok+'/5) | '+stage);
-                        await new Promise(function(r){setTimeout(r,rMs)});
-                        fetch('https://linux.do/t/'+t.id+'/timings',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrf,'Cookie':acc.cookie,'User-Agent':HEADERS['User-Agent']},body:JSON.stringify({timings:[{topic_id:t.id,msecs:rMs}]})}).catch(function(){});
-                        ok++;totalMs+=rMs;
-                        mt('✅ #'+t.id+' 完成 ('+ok+'/5) | ⏱ '+Math.round(rMs/1000)+'s | '+stage);
-                    } catch(e){ mt('❌ #'+t.id+' 异常: '+(e.message||e)); skipped++; }
-                }
-                var st=JSON.parse(await env.GLADOS_DB.get('LD_STATE_'+userId)||'{}');
-                var today=new Date().toISOString().slice(0,10);
-                if(st.date===today)st.readsToday=(st.readsToday||0)+ok;else{st.date=today;st.readsToday=ok;}
-                st.readTotal=(st.readTotal||0)+ok;st.totalReadTime=(st.totalReadTime||0)+totalMs;
-                st.failCount = ok > 0 ? 0 : (st.failCount||0) + 1;
-                if (ok > 0) st.failAlerted = false;
-                await env.GLADOS_DB.put('LD_STATE_'+userId,JSON.stringify(st));
-                await checkAndAlert(userId, st, 'LD', env);
-                await fetch('https://api.telegram.org/bot'+env.BOT_TOKEN+'/editMessageText',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chat_id:chatId,message_id:mid,text:'✅ LD 完成 '+ok+'/5 | 跳过 '+skipped+' | ⏱ '+Math.round(totalMs/1000)+'s | 📚 累计 '+st.readTotal+'帖(今'+st.readsToday+')',parse_mode:'HTML'})});
-            } catch(e) {
-                mt('❌ 致命: '+(e.message||e));
-            }
-            return;
-        }
         await tgSend(chatId, "⏳ 正在为您单独执行签到，请稍候...", env);
         const pref = await getPref(userId, env);
         const accData = await getAccountDataObj(acc, true); // true 代表触发签到
@@ -896,7 +806,6 @@ async function handleCallback(callbackQuery, env, origin) {
         await env.GLADOS_DB.put(`USER_${userId}`, JSON.stringify(accounts));
         if (acc.domain === 'nodeloc.com') await env.GLADOS_DB.delete('NL_STATE_' + userId);
         if (acc.domain === 'nodeseek.cc') await env.GLADOS_DB.delete('NS_STATE_' + userId);
-        if (acc.domain === 'linux.do') await env.GLADOS_DB.delete('LD_STATE_' + userId);
         const pref = await getPref(userId, env);
         await tgEdit(chatId, messageId, `✅ 已成功删除账号：<code>${maskEmail(deletedEmail, pref.showEmail)}</code>`, { inline_keyboard: [[{ text: "🔙 返回账户管理", callback_data: "list_manage" }]] }, env);
     }
@@ -915,11 +824,6 @@ async function handleCallback(callbackQuery, env, origin) {
         await env.GLADOS_DB.put(`STATE_${userId}`, 'AWAITING_NODESEEK_COOKIE', { expirationTtl: 300 });
         await env.GLADOS_DB.put(`TEMP_${userId}`, 'nodeseek.cc', { expirationTtl: 300 });
         await tgSend(chatId, "🔹 <b>绑定 NodeSeek 账号</b>\n\n打开 https://nodeseek.cc → F12 → Application → Cookies → 右键复制全部 Cookie，直接粘贴发送。\n\nBot 会自动解析。", env, { inline_keyboard: [[{ text: "🔙 返回", callback_data: "list_manage" }]] });
-    }
-    else if (data === 'add_linuxdo') {
-        await env.GLADOS_DB.put(`STATE_${userId}`, 'AWAITING_LINUXDO_COOKIE', { expirationTtl: 300 });
-        await env.GLADOS_DB.put(`TEMP_${userId}`, 'linux.do', { expirationTtl: 300 });
-        await tgSend(chatId, "🐧 <b>绑定 Linux DO 账号</b>\n\n打开 https://linux.do → F12 → Application → Cookies → 右键复制全部 Cookie，直接粘贴发送。\n\n💡 如果粘贴后 Bot 提示获取超时，说明 CF 防护拦截了 Bot 请求，需等待几小时到一天后重试，或换个时间段再试。\n\n需要手动阅读时 Bot 会显示 CF 拦截状态。", env, { inline_keyboard: [[{ text: "🔙 返回", callback_data: "list_manage" }]] });", env, { inline_keyboard: [[{ text: "🔙 返回", callback_data: "list_manage" }]] });
     }
     else if (data === 'bind_ns') {
     }
@@ -1072,56 +976,6 @@ async function processAddAccountInfo(chatId, userId, text, env) {
         return;
     }
 
-    // LinuxDO: 支持 邮箱:cookie 和裸 cookie
-    if (state === 'AWAITING_LINUXDO_COOKIE') {
-        let cookie = text.trim();
-        // 检查是否是 邮箱:cookie 格式（冒号在 _forum_session 之前）
-        let forcedName = null;
-        const colonIdx = cookie.indexOf(':');
-        const forumIdx = cookie.indexOf('_forum_session=');
-        if (colonIdx > 0 && forumIdx > colonIdx) {
-            forcedName = cookie.substring(0, colonIdx).trim();
-            cookie = cookie.substring(colonIdx + 1).trim();
-        }
-        if (!/_forum_session=/.test(cookie)) {
-            return tgSend(chatId, "❌ Cookie 格式错误！需要包含 <code>_forum_session</code>。", env);
-        }
-        if (forcedName) {
-            // 用户手动提供了邮箱，直接绑定
-            let accounts = await getAccounts(userId, env);
-            const sessionMatch = cookie.match(/_forum_session=([^;]+)/);
-            const sessionVal = sessionMatch ? sessionMatch[1] : null;
-            const exists = accounts.some(a => a.domain === 'linux.do' && a.cookie && sessionVal && a.cookie.includes(sessionVal));
-            if (exists) return tgSend(chatId, `ℹ️ 该账号已绑定（<code>${forcedName}</code>），无需重复操作。`, env);
-            accounts.push({ email: forcedName, username: forcedName, domain: 'linux.do', cookie });
-            await env.GLADOS_DB.put(`USER_${userId}`, JSON.stringify(accounts));
-            await saveUserIdForCron(userId, env);
-            const total = accounts.length;
-            const ldTotal = accounts.filter(a => a.domain === 'linux.do').length;
-            return tgSend(chatId, `✅ <b>LinuxDO 绑定成功！</b>\n\n👤 账号: <code>${forcedName}</code>\n🐧 LinuxDO 账号: ${ldTotal} 个\n📦 当前总账号数: ${total} 个\n\n⏰ 自动阅读将在下次整点 cron 开始。`, env);
-        }
-        const userInfo = await fetchDiscourseUser(cookie, LD_BASE);
-        if (!userInfo) {
-            // CF 防护下无法验证，提示用邮箱:cookie 格式重新发送
-            await env.GLADOS_DB.put(`STATE_${userId}`, 'AWAITING_LINUXDO_COOKIE', { expirationTtl: 300 });
-            return tgSend(chatId, "⚠️ linux.do 的 Cloudflare 防护阻止了自动验证。\n\n请用 <code>邮箱:cookie</code> 格式重新发送：\n\n<code>your@email.com:_forum_session=xxx; _t=yyy</code>\n\n💡 邮箱仅用于标识账号，不会用于登录。", env);
-        }
-        let accounts = await getAccounts(userId, env);
-        // 去重：同一 _forum_session 不重复绑定
-        const sessionMatch = cookie.match(/_forum_session=([^;]+)/);
-        const sessionVal = sessionMatch ? sessionMatch[1] : null;
-        const displayName = userInfo.email || userInfo.username;
-        const exists = accounts.some(a => a.domain === 'linux.do' && a.cookie && sessionVal && a.cookie.includes(sessionVal));
-        if (exists) return tgSend(chatId, `ℹ️ 该账号已绑定（<code>${displayName}</code>），无需重复操作。`, env);
-        accounts.push({ email: userInfo.email, username: userInfo.username, domain: 'linux.do', cookie });
-        await env.GLADOS_DB.put(`USER_${userId}`, JSON.stringify(accounts));
-        await saveUserIdForCron(userId, env);
-        const total = accounts.length;
-        const ldTotal = accounts.filter(a => a.domain === 'linux.do').length;
-        await tgSend(chatId, `✅ <b>LinuxDO 绑定成功！</b>\n\n👤 账号: <code>${displayName}</code>\n🐧 LinuxDO 账号: ${ldTotal} 个\n📦 当前总账号数: ${total} 个\n\n⏰ 自动阅读将在下次整点 cron 开始。`, env);
-        return;
-    }
-
     // GLaDOS 裸 cookie：自动提取邮箱
     if (text.indexOf(':') === -1 && text.indexOf('=') > -1 && /expires=|connect.sid|_forum_session/.test(text) === false) {
         const gladosDomains = ['glados.network', 'railgun.info', 'glados.vip', 'glados.one', 'glados.space'];
@@ -1143,7 +997,7 @@ async function processAddAccountInfo(chatId, userId, text, env) {
             accounts.push({ domain: found.domain, email: found.email, cookie: text.trim() });
             await env.GLADOS_DB.put(`USER_${userId}`, JSON.stringify(accounts));
             await saveUserIdForCron(userId, env);
-            const total = accounts.filter(a => a.domain !== 'nodeloc.com' && a.domain !== 'nodeseek.cc' && a.domain !== 'linux.do').length;
+            const total = accounts.filter(a => a.domain !== 'nodeloc.com' && a.domain !== 'nodeseek.cc').length;
             return tgSend(chatId, `✅ <b>GLaDOS 绑定成功！</b>\n\n👤 账号: <code>${found.email}</code>\n🔗 域名: <code>${found.domain}</code>\n📦 当前 GLaDOS 账号数: ${total} 个\n\n💡 如需手动绑定，使用 <code>邮箱:cookie</code> 或 <code>邮箱,cookie,域名</code> 格式。`, env);
         }
         return tgSend(chatId, "❌ 无法验证 Cookie，请确认已登录后重新抓取。\n\n也可以使用 <code>邮箱:cookie</code> 或 <code>邮箱,cookie,域名</code> 格式手动绑定。", env);
@@ -1190,7 +1044,7 @@ async function processUpdateCookie(chatId, userId, text, env) {
     
     accounts[index].cookie = text.trim();
     await env.GLADOS_DB.put(`USER_${userId}`, JSON.stringify(accounts));
-    const isDiscourse = accounts[index].domain === 'nodeloc.com' || accounts[index].domain === 'nodeseek.cc' || accounts[index].domain === 'linux.do';
+    const isDiscourse = accounts[index].domain === 'nodeloc.com' || accounts[index].domain === 'nodeseek.cc';
     if (isDiscourse) {
         await tgSend(chatId, "✅ Cookie 更新成功！请使用手动阅读测试。", env, { inline_keyboard: [[{ text: "🔙 返回账户管理", callback_data: "list_manage" }]] });
         return;
@@ -1291,29 +1145,12 @@ async function executeTask(task, env, origin) {
                 }
                 continue;
             }
-            if (acc.domain === 'linux.do') {
-                if (type === 'view_all') {
-                    const s = await ldGetDailyStats(userId, env);
-                    let ldInfo = `├ 🐧 LinuxDO 自动阅读\n├ 📝 今日已读 ${s.readsToday} 帖`;
-                    if (s.totalReadTime > 0) ldInfo += `\n├ ⏱ 累计阅读 ${s.totalReadTime} 分钟`;
-                    if (s.readTotal > 0) ldInfo += `\n├ 📚 累计阅读 ${s.readTotal} 帖`;
-                    if (s.restUntil > 0) {
-                        const mins = Math.ceil((s.restUntil - Date.now()) / 60000);
-                        ldInfo += `\n├ 💤 休息中（剩余 ${mins} 分钟）`;
-                    }
-                    if (s.cookieError) {
-                        ldInfo += `\n├ ❌ ${s.cookieError}`;
-                    }
-                    msgs.push(`〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️\n[${i+1}/${accounts.length}] 👤 ${maskEmail(acc.username || acc.email, pref.showEmail)}\n${ldInfo}`);
-                }
-                continue;
-            }
             const doCheckin = (type === 'checkin');
             const data = await getAccountDataObj(acc, doCheckin);
             msgs.push(formatAccountString(acc, i + 1, accounts.length, pref, data, true, false));
         } 
         else if (type === 'batch_exchange') {
-            if (acc.domain === 'nodeloc.com' || acc.domain === 'nodeseek.cc' || acc.domain === 'linux.do') continue;
+            if (acc.domain === 'nodeloc.com' || acc.domain === 'nodeseek.cc') continue;
             const ptsRes = await safeFetchJson(`https://${acc.domain}/api/user/points`, { headers: { ...HEADERS, 'cookie': acc.cookie, 'origin': `https://${acc.domain}` }});
             let balanceNum = 0;
             if (ptsRes && ptsRes.code === 0) balanceNum = parseInt(ptsRes.points || 0);
@@ -1331,7 +1168,7 @@ async function executeTask(task, env, origin) {
             }
         }
         else if (type === 'sub_all') {
-            if (acc.domain === 'nodeloc.com' || acc.domain === 'nodeseek.cc' || acc.domain === 'linux.do') continue;
+            if (acc.domain === 'nodeloc.com' || acc.domain === 'nodeseek.cc') continue;
             const link = await getSubAndHost(acc.domain, acc.cookie, true);
             if (link && !link.includes('xxxx')) {
                 msgs.push(`<b>${i+1}. ${maskEmail(acc.email, pref.showEmail)}</b>\n<code>${link}</code>\n`);
@@ -1393,7 +1230,7 @@ async function handleScheduled(env) {
         if (isTrigger) {
             let nlAcc = null;
             for (let acc of accounts) {
-                if (acc.domain === 'nodeloc.com' || acc.domain === 'nodeseek.cc' || acc.domain === 'linux.do') { if (acc.domain === 'nodeloc.com') nlAcc = acc; continue; }
+                if (acc.domain === 'nodeloc.com' || acc.domain === 'nodeseek.cc') { if (acc.domain === 'nodeloc.com') nlAcc = acc; continue; }
                 const reqOpts = { headers: { ...HEADERS, 'cookie': acc.cookie, 'origin': `https://${acc.domain}` } };
                 const result = await safeFetchJson(`https://${acc.domain}/api/user/checkin`, {
                     ...reqOpts, method: 'POST', body: JSON.stringify({ token: acc.domain })
@@ -1415,18 +1252,16 @@ async function handleScheduled(env) {
                     })
                 }).catch(function(){});
             }
-            const gladosCount = accounts.filter(a => a.domain !== 'nodeloc.com' && a.domain !== 'nodeseek.cc' && a.domain !== 'linux.do').length;
+            const gladosCount = accounts.filter(a => a.domain !== 'nodeloc.com' && a.domain !== 'nodeseek.cc').length;
             let extraLine = '\n\n' + (await getHealthSummary(userId, env)).replace(/\| 已读 \d+ 帖/g, '');
             await tgSend(userId, `⏰ <b>定时签到自动完成</b>\n已在后台成功向 ${gladosCount} 个账号发送了签到指令。${extraLine}`, env);
         }
-        // 三个论坛并行阅读，共享 15 分钟时间窗口
+        // 两个论坛并行阅读，共享 15 分钟时间窗口
         const readPromises = [];
         const nlAcc = accounts.find(a => a.domain === 'nodeloc.com' && a.cookie);
         if (nlAcc) readPromises.push(runNodelocBatch(userId, nlAcc.cookie, env).catch(e => {}));
         const nsAcc = accounts.find(a => a.domain === 'nodeseek.cc' && a.cookie);
         if (nsAcc) readPromises.push(runNodelocBatch(userId, nsAcc.cookie, env, NS_BASE, false, 'NS').catch(e => {}));
-        const ldAcc = accounts.find(a => a.domain === 'linux.do' && a.cookie);
-        if (ldAcc) readPromises.push(runNodelocBatch(userId, ldAcc.cookie, env, LD_BASE, false, 'LD').catch(e => {}));
         await Promise.all(readPromises);
     }
 }
@@ -1641,7 +1476,6 @@ async function showSiteListMenu(chatId, messageId, userId, env) {
     allSites.forEach((site, index) => kb.push([{ text: `🌐 ${site}`, callback_data: `selsite_${index}` }]));
     kb.push([{ text: "🌐 NodeLoc 自动阅读", callback_data: "add_nodeloc" }]);
     kb.push([{ text: "🔹 NodeSeek 自动阅读", callback_data: "add_nodeseek" }]);
-    kb.push([{ text: "🐧 LinuxDO 自动阅读", callback_data: "add_linuxdo" }]);
     kb.push([{ text: "🔧 自定义网站管理", callback_data: "site_mgr" }]);
     kb.push([{ text: "🔙 返回上级", callback_data: "account_mgr_menu" }]);
     await tgEdit(chatId, messageId, "🌐 <b>选择要添加账号的站点</b>\n\n点击下方站点按钮，或者进入自定义管理：", { inline_keyboard: kb }, env);
