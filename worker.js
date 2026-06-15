@@ -839,10 +839,11 @@ async function handleCallback(callbackQuery, env, origin) {
             var mt = function(s) { fetch('https://api.telegram.org/bot'+env.BOT_TOKEN+'/editMessageText',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chat_id:chatId,message_id:mid,text:s,parse_mode:'HTML'})}); };
             mt('📖 LD 手动阅读\n───────');
             try {
-                var r1 = await Promise.race([fetch('https://linux.do/latest.json?no_definitions=true',{headers:{'User-Agent':HEADERS['User-Agent'],'Cookie':acc.cookie,'Accept':'application/json'}}),new Promise(function(r){setTimeout(r,15000)})]);
-                if(!r1){ mt('❌ 话题列表超时'); return; }
-                if(!r1.ok){ mt('❌ 话题列表 '+r1.status); return; }
+                var ac = new AbortController(), acTm = setTimeout(function(){ac.abort()},12000);
+                var r1 = await fetch('https://linux.do/latest.json?no_definitions=true',{headers:{'User-Agent':HEADERS['User-Agent'],'Cookie':acc.cookie,'Accept':'application/json'},signal:ac.signal});
+                if(!r1.ok){ clearTimeout(acTm); mt('❌ 话题列表 '+r1.status); return; }
                 var d1 = await r1.json().catch(function(){return{}});
+                clearTimeout(acTm);
                 var allTopics = (d1.topic_list?.topics||[]).filter(function(t){return !t.pinned&&t.id});
                 mt('📥 列表: 共 '+allTopics.length+' 个话题，准备读 5 帖');
                 var ok=0,totalMs=0,skipped=0,tried=0;
