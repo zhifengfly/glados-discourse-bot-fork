@@ -71,28 +71,31 @@ async function nlRefreshQueue(baseUrl, cookie, proxyUrl) {
 }
 
 // 模拟阅读一帖（静默，不抛消息）
-async function nlReadTopic(baseUrl, cookie, topic, fast = false) {
+async function nlReadTopic(baseUrl, cookie, topic, fast = false, proxyUrl) {
     await nlSleep(fast ? nlRand(500, 1500) : nlRand(5000, 15000));
     const ua = NL_UAS[nlRand(0, NL_UAS.length-1)];
-    const hdrs = {
+    var isProxy = !!proxyUrl;
+    var hdrs = {
         'User-Agent': ua,
-        'Cookie': cookie,
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
         'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
         'Referer': baseUrl + '/',
         'Cache-Control': 'no-cache',
         'Pragma': 'no-cache'
     };
+    if (!isProxy) hdrs['Cookie'] = cookie;
     // 页面 fetch best-effort，失败不阻断（从 cookie _t 拿 CSRF 兜底）
-    const resp = await safeFetchTimeout(baseUrl + '/t/' + topic.id, { headers: hdrs }, 15000);
+    var topicUrl = isProxy ? proxyUrl + '/t/' + topic.id + '?_cookie=' + encodeURIComponent(cookie) : baseUrl + '/t/' + topic.id;
+    var resp = await safeFetchTimeout(topicUrl, { headers: hdrs }, 15000);
     let csrf = '';
     if (resp && resp.ok) {
-        const html = await Promise.race([resp.text(), new Promise(function(r){setTimeout(function(){r('')},20000)})]);
+        var html = await Promise.race([resp.text(), new Promise(function(r){setTimeout(function(){r('')},20000)})]);
         csrf = (html.match(/csrf-token" content="([^"]+)"/) || [])[1];
         if (!csrf) {
-            const csrfResp = await safeFetchTimeout(baseUrl + '/session/csrf', {
-                headers: { 'User-Agent': ua, 'Cookie': cookie, 'Accept': 'application/json' }
-            }, 8000);
+            var csrfUrl = isProxy ? proxyUrl + '/session/csrf?_cookie=' + encodeURIComponent(cookie) : baseUrl + '/session/csrf';
+            var csrfHdrs = { 'User-Agent': ua, 'Accept': 'application/json' };
+            if (!isProxy) csrfHdrs['Cookie'] = cookie;
+            var csrfResp = await safeFetchTimeout(csrfUrl, { headers: csrfHdrs }, 8000);
             if (csrfResp && csrfResp.ok) {
                 try { const d = await csrfResp.json(); csrf = d.csrf || ''; } catch(e) {}
             }
@@ -107,18 +110,20 @@ async function nlReadTopic(baseUrl, cookie, topic, fast = false) {
 
     if (csrf) {
         try {
-            await fetch(baseUrl + '/t/' + topic.id + '/timings', {
+            var timingUrl = isProxy ? proxyUrl + '/t/' + topic.id + '/timings?_cookie=' + encodeURIComponent(cookie) : baseUrl + '/t/' + topic.id + '/timings';
+            var timingHdrs = {
+                'User-Agent': ua,
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': csrf,
+                'Accept': 'application/json, text/javascript, */*; q=0.01',
+                'X-Requested-With': 'XMLHttpRequest',
+                'Referer': baseUrl + '/t/' + topic.id,
+                'Origin': baseUrl
+            };
+            if (!isProxy) timingHdrs['Cookie'] = cookie;
+            await fetch(timingUrl, {
                 method: 'POST',
-                headers: {
-                    'User-Agent': ua,
-                    'Cookie': cookie,
-                    'Content-Type': 'application/json',
-                    'X-CSRF-Token': csrf,
-                    'Accept': 'application/json, text/javascript, */*; q=0.01',
-                    'X-Requested-With': 'XMLHttpRequest',
-                    'Referer': baseUrl + '/t/' + topic.id,
-                    'Origin': baseUrl
-                },
+                headers: timingHdrs,
                 body: JSON.stringify({ timings: { 1: readTime }, topic_time: readTime })
             });
         } catch(e) {}
@@ -241,7 +246,7 @@ async function checkAndAlert(userId, state, prefix, env) {
 }
 
 // 主入口：每次 cron 触发，静默读多帖
-async function runNodelocBatch(userId, cookie, env, baseUrl = NL_BASE, fast = false, statePrefix = 'NL') {
+async function runNodelocBatch(userId, cookie, env, baseUrl = NL_BASE, fast = false, statePrefix = 'NL', proxyUrl) {
     if (!cookie) return;
     try {
         const state = await nlGetState(userId, env, statePrefix);
@@ -273,7 +278,7 @@ async function runNodelocBatch(userId, cookie, env, baseUrl = NL_BASE, fast = fa
 
             // 确保队列有话题
             if (state.queue.length === 0) {
-                const topics = await nlRefreshQueue(baseUrl, cookie);
+                const topics = await nlRefreshQueue(baseUrl, cookie, proxyUrl);
                 if (topics.length === 0) {
                     state._lastError = '刷新队列返回空';
                     state.cookieError = 'CF 拦截或 cookie 失效';
@@ -467,6 +472,7 @@ async function handleMessage(message, env, origin) {
     else if (state === 'AWAITING_NODESEEK_COOKIE') await processAddAccountInfo(chatId, userId, text, env);
     else if (state === 'AWAITING_LINUXDO_COOKIE') await processAddAccountInfo(chatId, userId, text, env);
     else if (state === 'AWAITING_UPDATE_COOKIE') await processUpdateCookie(chatId, userId, text, env);
+    else if (state === 'AWAITING_PROXY_URL') await processProxyUrl(chatId, userId, text, env);
     else if (state === 'AWAITING_CRON_TIME') await processCronTime(chatId, userId, text, env);
     else if (state === 'AWAITING_NEW_SITE') await processNewSite(chatId, userId, text, env);
     else if (state === 'AWAITING_DELETE_SITE') await processDeleteSite(chatId, userId, text, env);
@@ -652,14 +658,15 @@ async function handleCallback(callbackQuery, env, origin) {
 
         if (action === 'manage') {
             const isDiscourse = acc.domain === 'nodeloc.com' || acc.domain === 'nodeseek.cc' || acc.domain === 'linux.do';
-            const kb = {
-                inline_keyboard: [
-                    [{ text: "👁️ 查看此账户信息", callback_data: `view_acc_${index}` },
-                     { text: isDiscourse ? "📖 立即单独阅读" : "✅ 立即单独签到", callback_data: isDiscourse ? `rd_acc_${index}` : `chk_acc_${index}` }],
-                    [{ text: "🔁 更新 Cookies", callback_data: `upd_acc_${index}` }, { text: "❌ 删除此账户", callback_data: `del_acc_${index}` }],
-                    [{ text: "🔙 返回账号列表", callback_data: "list_manage" }]
-                ]
-            };
+            var kbRows = [
+                [{ text: "👁️ 查看此账户信息", callback_data: `view_acc_${index}` },
+                 { text: isDiscourse ? "📖 立即单独阅读" : "✅ 立即单独签到", callback_data: isDiscourse ? `rd_acc_${index}` : `chk_acc_${index}` }],
+                [{ text: "🔁 更新 Cookies", callback_data: `upd_acc_${index}` }]
+            ];
+            if (isDiscourse) kbRows[1].push({ text: "🌐 Proxy", callback_data: `proxy_acc_${index}` });
+            kbRows[1].push({ text: "❌ 删除", callback_data: `del_acc_${index}` });
+            kbRows.push([{ text: "🔙 返回账号列表", callback_data: "list_manage" }]);
+            const kb = { inline_keyboard: kbRows };
             await tgEdit(chatId, messageId, `⚙️ <b>管理账户</b>\n\n当前账户：<code>${maskEmail(acc.email || acc.username || '?', pref.showEmail)}</code>\n所属站点：<code>${acc.domain}</code>\n\n请选择操作：`, kb, env);
         } else if (action === 'exchange') {
             await showExchangePlans(chatId, messageId, index, acc, userId, env);
@@ -857,15 +864,15 @@ async function handleCallback(callbackQuery, env, origin) {
             try {
                 var ac = new AbortController(), acTm = setTimeout(function(){ac.abort()},20000);
                 var ldUrl, ldOpts;
-                if (env.LD_PROXY_URL) {
-                    ldUrl = env.LD_PROXY_URL + '/latest.json?no_definitions=true&_cookie=' + encodeURIComponent(acc.cookie);
+                if (acc.proxyUrl) {
+                    ldUrl = acc.proxyUrl + '/latest.json?no_definitions=true&_cookie=' + encodeURIComponent(acc.cookie);
                     ldOpts = { signal: ac.signal };
                 } else {
                     ldUrl = 'https://linux.do/latest.json?no_definitions=true';
                     ldOpts = { headers: {'User-Agent':HEADERS['User-Agent'],'Cookie':acc.cookie,'Accept':'application/json','Accept-Language':'zh-CN,zh;q=0.9,en;q=0.8','Sec-CH-UA':'"Chromium";v="120","Google Chrome";v="120"','Sec-CH-UA-Mobile':'?0','Sec-CH-UA-Platform':'"Windows"'}, signal: ac.signal };
                 }
                 var r1 = await fetch(ldUrl, ldOpts);
-                if(!r1.ok){ clearTimeout(acTm); await mt(env.LD_PROXY_URL ? '❌ Sidecar proxy 错误 '+r1.status : '❌ CF 拦截 linux.do (403) — 需配置 Sidecar Proxy 或重新抓取完整 cookie'); return; }
+                if(!r1.ok){ clearTimeout(acTm); await mt(acc.proxyUrl ? '❌ Sidecar proxy 错误 '+r1.status : '❌ CF 拦截 linux.do (403) — 需配置 Sidecar Proxy 或重新抓取完整 cookie'); return; }
                 var d1 = await r1.json().catch(function(){return{}});
                 clearTimeout(acTm);
                 var allTopics = (d1.topic_list?.topics||[]).filter(function(t){return !t.pinned&&t.id});
@@ -927,6 +934,15 @@ async function handleCallback(callbackQuery, env, origin) {
         await env.GLADOS_DB.put(`STATE_${userId}`, 'AWAITING_UPDATE_COOKIE', { expirationTtl: 300 });
         await env.GLADOS_DB.put(`TEMP_${userId}`, index.toString(), { expirationTtl: 300 });
         await tgSend(chatId, `🔁 <b>请直接回复新的 Cookie 内容：</b>`, env);
+    }
+    else if (data.startsWith('proxy_acc_')) {
+        const index = parseInt(data.split('_')[2]);
+        const accounts = await getAccounts(userId, env);
+        const acc = accounts[index];
+        const curProxy = acc.proxyUrl ? '当前：<code>' + acc.proxyUrl + '</code>\n\n' : '';
+        await env.GLADOS_DB.put(`STATE_${userId}`, 'AWAITING_PROXY_URL', { expirationTtl: 300 });
+        await env.GLADOS_DB.put(`TEMP_${userId}`, index.toString(), { expirationTtl: 300 });
+        await tgSend(chatId, `${curProxy}🌐 <b>配置 Sidecar Proxy 地址</b>\n\n发送 Proxy URL 即可，例如：\n<code>https://ld-proxy.onrender.com</code>\n\n发送 <code>/clear</code> 清除当前 Proxy 配置。`, env);
     }
     else if (data === 'add_nodeloc') {
         await env.GLADOS_DB.put(`STATE_${userId}`, 'AWAITING_NODELOC_COOKIE', { expirationTtl: 300 });
@@ -1225,6 +1241,34 @@ async function processUpdateCookie(chatId, userId, text, env) {
     await tgSend(chatId, msgStr, env, { inline_keyboard: [[{ text: "🔙 返回账户管理", callback_data: "list_manage" }]] });
 }
 
+async function processProxyUrl(chatId, userId, text, env) {
+    const indexStr = await env.GLADOS_DB.get(`TEMP_${userId}`);
+    await env.GLADOS_DB.delete(`STATE_${userId}`);
+    await env.GLADOS_DB.delete(`TEMP_${userId}`);
+
+    if (!indexStr) return tgSend(chatId, "❌ 会话过期。", env);
+    const index = parseInt(indexStr);
+    const accounts = await getAccounts(userId, env);
+    if (!accounts[index]) return tgSend(chatId, "❌ 账号不存在", env);
+
+    if (text === '/clear') {
+        delete accounts[index].proxyUrl;
+        await env.GLADOS_DB.put(`USER_${userId}`, JSON.stringify(accounts));
+        return tgSend(chatId, "✅ Proxy 已清除。", env, { inline_keyboard: [[{ text: "🔙 返回", callback_data: "list_manage" }]] });
+    }
+
+    let url = text.trim();
+    try {
+        new URL(url); // validate URL
+    } catch(e) {
+        return tgSend(chatId, "❌ URL 格式无效，请发送完整 URL（以 https:// 开头）。", env);
+    }
+
+    accounts[index].proxyUrl = url;
+    await env.GLADOS_DB.put(`USER_${userId}`, JSON.stringify(accounts));
+    await tgSend(chatId, `✅ Proxy 已配置：<code>${url}</code>\n\nLD 请求将自动通过此 Proxy 转发。`, env, { inline_keyboard: [[{ text: "🔙 返回账户管理", callback_data: "list_manage" }]] });
+}
+
 async function processNewSite(chatId, userId, text, env) {
     await env.GLADOS_DB.delete(`STATE_${userId}`);
     let newSite = text.trim();
@@ -1448,7 +1492,7 @@ async function handleScheduled(env) {
         const nsAcc = accounts.find(a => a.domain === 'nodeseek.cc' && a.cookie);
         if (nsAcc) readPromises.push(runNodelocBatch(userId, nsAcc.cookie, env, NS_BASE, false, 'NS').catch(e => {}));
         const ldAcc = accounts.find(a => a.domain === 'linux.do' && a.cookie);
-        if (ldAcc) readPromises.push(runNodelocBatch(userId, ldAcc.cookie, env, LD_BASE, false, 'LD').catch(e => {}));
+        if (ldAcc) readPromises.push(runNodelocBatch(userId, ldAcc.cookie, env, LD_BASE, false, 'LD', ldAcc.proxyUrl).catch(e => {}));
         await Promise.all(readPromises);
     }
 }
